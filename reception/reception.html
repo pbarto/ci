@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title></title>
+    <meta name="Reception" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="reception.css">
+    <script src="config.js"></script>
+
+    <script src="https://sdk-cdn.mypurecloud.com/javascript/106.0.0/purecloud-platform-client-v2.min.js"></script>
+</head>
+
+<body onload="start()">
+    <div class="container" id="container">
+    </div>
+    <script>
+        let debug = localStorage.getItem('gc_debug') //Enables user to set debug mode
+        let gc_region = getParameterByName('gc_region')
+        let gc_clientId = getParameterByName('gc_clientId')
+        let gc_redirectUrl = getParameterByName('gc_redirectUrl')
+
+        //Getting and setting the GC details from dynamic URL and session storage
+        if (gc_region) {
+            sessionStorage.setItem('gc_region', gc_region)
+            if (debug) console.log('gc_region Saved: ', gc_region)
+        } else {
+            gc_region = sessionStorage.getItem('gc_region')
+            if (debug) console.log('gc_region retreived: ', gc_region)
+        }
+        if (gc_clientId) {
+            sessionStorage.setItem('gc_clientId', gc_clientId)
+            if (debug) console.log('gc_clientId Saved: ', gc_clientId)
+        } else {
+            gc_clientId = sessionStorage.getItem('gc_clientId')
+            if (debug) console.log('gc_clientId retreived: ', gc_clientId)
+        }
+        if (gc_redirectUrl) {
+            sessionStorage.setItem('gc_redirectUrl', gc_redirectUrl)
+            if (debug) console.log('gc_redirectUrl Saved: ', gc_redirectUrl)
+        } else {
+            gc_redirectUrl = sessionStorage.getItem('gc_redirectUrl')
+            if (debug) console.log('gc_redirectUrl retreived: ', gc_redirectUrl)
+        }
+
+        let platformClient = require('platformClient');
+
+        async function start() {
+            try {
+                const client = platformClient.ApiClient.instance
+                const uapi = new platformClient.UsersApi()
+                const sapi = new platformClient.SearchApi()
+                const capi = new platformClient.ConversationsApi()
+                const napi = new platformClient.NotificationsApi()
+                const papi = new platformClient.PresenceApi()
+
+                client.setEnvironment(gc_region)
+                client.setPersistSettings(true, '_mm_')
+
+                if (debug) console.log('Logging in to Genesys Cloud')
+                await client.loginImplicitGrant(gc_clientId, gc_redirectUrl, {})
+
+                //Get Users ID for each email address in the config.js file array
+                for (const email of contacts) {
+                    var body = {
+                        "pageSize": 25,
+                        "pageNumber": 1,
+                        "types": [
+                            "users"
+                        ],
+                        "sortOrder": "SCORE",
+                        "query": [{
+                            "type": "TERM",
+                            "fields": [
+                                "email"
+                            ],
+                            "operator": "AND",
+                            "value": email.email
+                        }]
+                    }
+                    var opts = {
+                        'profile': false
+                    };
+
+                    let user = await sapi.postSearch(body, opts)
+
+                    //Build out the HTML elements based on the Array input
+                    if (user.total > 0) {
+                        var image
+                        if (user.results[0].images != null) {
+                            for (const images of user.results[0].images) {
+                                if (images.resolution === "x48") {
+                                    image = images.imageUri
+                                }
+                            }
+                        } else {
+                            image = "https://dhqbrvplips7x.cloudfront.net/directory/10.36.0-2/assets/images/svg/person.svg"
+                        }
+                        if (debug) console.log('Name: ', user.results[0].name)
+                        if (debug) console.log('Email: ', user.results[0].email)
+
+                        let getUser = await uapi.getUser(user.results[0].id, {
+                            expand: ["presence"]
+                        })
+                        var userPresence = getUser.presence.presenceDefinition.systemPresence
+
+                        var header = document.createElement("header")
+                        var divImage = document.createElement("div")
+                        divImage.className = "userImage"
+                        var divAvatar = document.createElement("img")
+                        divAvatar.id = `avatar_${user.results[0].id}`
+
+                        var userAvatarClass
+                        switch (userPresence) {
+                            case "Offline":
+                                userAvatarClass = "userAvatarOffline"
+                                break;
+                            case "Available":
+                                userAvatarClass = "userAvatarAvailable"
+                                break;
+                            case "Busy":
+                                userAvatarClass = "userAvatarBusy"
+                                break;
+                            case "Away":
+                                userAvatarClass = "userAvatarAway"
+                                break;
+                            case "Break":
+                                userAvatarClass = "userAvatarBreak"
+                                break;
+                            case "Meal":
+                                userAvatarClass = "userAvatarMeal"
+                                break;
+                            case "Meeting":
+                                userAvatarClass = "userAvatarMeeting"
+                                break;
+                            case "Training":
+                                userAvatarClass = "userAvatarTraining"
+                                break;
+                            case "On Queue":
+                                userAvatarClass = "userAvatarOnQueue"
+                                break;
+                            default:
+                                userAvatarClass = "userAvatarOffline"
+                                console.log('Presence mode not supported: ', userPresence)
+                                break;
+                        }
+
+                        divAvatar.className = userAvatarClass
+                        divAvatar.src = image
+                        if (image === "https://dhqbrvplips7x.cloudfront.net/directory/10.36.0-2/assets/images/svg/person.svg") {
+                            divAvatar.style.width = "48px"
+                            divAvatar.style.height = "48px"
+                        }
+                        var text = document.createElement("div")
+                        var name = document.createElement("div")
+                        var presence = document.createElement("div")
+                        var right = document.createElement("div")
+                        var callButton = document.createElement("button")
+                        var transferButton = document.createElement("button")
+                        var phoneImg = document.createElement("img")
+                        var transferImg = document.createElement("img")
+                        phoneImg.src = "phone.png"
+                        transferImg.src = "arrow_right.png"
+                        callButton.id = user.results[0].id
+                        transferButton.id = `transferButton_${user.results[0].id}`
+                        callButton.onclick = function() {
+                            makeCall(this.id)
+                        }
+                        transferButton.onclick = function() {
+                            makeTransfer((this.id).substring(15))
+                        }
+
+                        name.className = "textName"
+                        name.innerHTML = user.results[0].name
+                        presence.id = `presence_${user.results[0].id}`
+                        presence.className = "textPresence"
+                        presence.innerHTML = userPresence
+                        right.className = "right"
+                        callButton.className = "callButton"
+                        transferButton.className = "transferButton"
+                        phoneImg.className = "phoneIcon"
+                        transferImg.className = "transferIcon"
+
+                        text.appendChild(name)
+                        text.appendChild(presence)
+                        divImage.appendChild(divAvatar)
+                        callButton.appendChild(phoneImg)
+                        transferButton.appendChild(transferImg)
+                        right.appendChild(callButton)
+                        right.appendChild(transferButton)
+
+                        header.appendChild(divImage)
+                        header.appendChild(text)
+                        header.appendChild(right)
+                        document.getElementById("container").appendChild(header)
+
+                        //Get users current call status and change callButton color if on a call to red
+                        let getUserCalls = await uapi.getUser(user.results[0].id, {
+                            expand: ["conversationSummary"]
+                        })
+                        if (debug) console.log('getUsersCalls: ', getUserCalls)
+
+                        if (getUserCalls.conversationSummary.call.contactCenter.active != 0 || getUserCalls.conversationSummary.call.contactCenter.acw != 0 || getUserCalls.conversationSummary.call.enterprise.active != 0 || getUserCalls.conversationSummary.callback.contactCenter.active != 0 || getUserCalls.conversationSummary.callback.contactCenter.acw != 0 || getUserCalls.conversationSummary.callback.enterprise.active != 0) {
+                            document.getElementById(user.results[0].id).className = "callButtonRed"
+                        }
+
+                        //Need to store wss as only can have 15 per agent. Also bad practice to create multiply
+                        if (sessionStorage.getItem("_gc_channelid") != null) {
+                            if (debug) console.log('channelid already exists...')
+                            if (debug) console.log(sessionStorage.getItem("_gc_channelid"))
+                            var channelid = sessionStorage.getItem("_gc_channelid")
+
+                            let userPresence = `v2.users.${user.results[0].id}.presence`
+                            await napi.postNotificationsChannelSubscriptions(channelid, [{
+                                id: userPresence
+                            }])
+                            if (debug) console.log(`Subscribed to presence ${userPresence}`)
+
+                            let userCallsTopic = `v2.users.${user.results[0].id}.conversations.calls`
+                            await napi.postNotificationsChannelSubscriptions(channelid, [{
+                                id: userCallsTopic
+                            }])
+                            if (debug) console.log(`Subscribed to topic ${userCallsTopic}`)
+                        }
+                        if (sessionStorage.getItem("_gc_channelid") === null) {
+                            let channel = await napi.postNotificationsChannels()
+                            if (debug) console.log('Created Notification Channel: ', channel)
+
+                            let userPresence = `v2.users.${user.results[0].id}.presence`
+                            await napi.postNotificationsChannelSubscriptions(channel.id, [{
+                                id: userPresence
+                            }])
+                            if (debug) console.log(`Subscribed to presence ${userPresence}`)
+
+                            let userCallsTopic = `v2.users.${user.results[0].id}.conversations.calls`
+                            await napi.postNotificationsChannelSubscriptions(channel.id, [{
+                                id: userCallsTopic
+                            }])
+                            if (debug) console.log(`Subscribed to topic ${userCallsTopic}`)
+                            sessionStorage.setItem("_gc_channelid", channel.id)
+                            if (debug) console.log(sessionStorage.getItem("_gc_channelid"))
+                        }
+                    }
+                }
+
+            } catch (err) {
+                console.error('Error: ', err)
+            }
+
+            //Create websocket for events
+            try {
+                let socket = new WebSocket(`wss://streaming.${gc_region}/channels/${sessionStorage.getItem("_gc_channelid")}`)
+
+                socket.onmessage = async function(event) {
+                    let details = JSON.parse(event.data)
+
+                    //presence change
+                    if ((details.topicName).includes("presence")) {
+                        if (debug) console.log('Presence Changed: ', details)
+                        var presenceChange = details.eventBody.presenceDefinition.systemPresence
+                        var data = (details.topicName).split('.')
+                        var dataUserId = data[2]
+                        if (debug) console.log('UserId: ', dataUserId)
+
+                        switch (presenceChange) {
+                            case "OFFLINE":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarOffline"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Offline"
+                                break;
+                            case "AVAILABLE":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarAvailable"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Available"
+                                break;
+                            case "BUSY":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarBusy"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Busy"
+                                break;
+                            case "AWAY":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarAway"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Away"
+                                break;
+                            case "BREAK":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarBreak"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Break"
+                                break;
+                            case "MEAL":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarMeal"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Meal"
+                                break;
+                            case "MEETING":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarMeeting"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Meeting"
+                                break;
+                            case "TRAINING":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarTraining"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Training"
+                                break;
+                            case "ON_QUEUE":
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarOnQueue"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "On Queue"
+                                break;
+                            default:
+                                document.getElementById(`avatar_${dataUserId}`).className = "userAvatarOffline"
+                                document.getElementById(`presence_${dataUserId}`).innerHTML = "Offline"
+                                console.log('Presence mode not supported: ', presenceChange)
+                                break;
+                        }
+                    }
+                    //if Call notification
+                    if ((details.topicName).includes("call")) {
+                        if (debug) console.log('Call Notification: ', details)
+                        let participant = details.eventBody.participants.find(p => p.purpose === "agent" || p.purpose === "user")
+                        if (participant) {
+                            if (debug) console.log('Participant userId: ', participant.user.id)
+                            if (debug) console.log('Participant state: ', participant.state)
+                            if (participant.state === 'contacting') {
+                                document.getElementById(participant.user.id).className = "callButtonRed"
+                                if (debug) console.log(`userId : ${participant.user.id} callButton changed`)
+                            }
+                            if (participant.state === 'terminated') {
+                                document.getElementById(participant.user.id).className = "callButton"
+                                if (debug) console.log(`userId : ${participant.user.id} callButton changed`)
+                            }
+                        }
+                    }
+                }
+                if (debug) console.log(`Waiting for events on wss://streaming.${gc_region}/channels/${sessionStorage.getItem("_gc_channelid")}`)
+            } catch (err) {
+                console.error('Websocket error: ', err)
+            }
+        } //End of loaded section
+
+        async function makeCall(calledUserId) {
+            var body = {
+                callUserId: calledUserId
+            }
+
+            const client = platformClient.ApiClient.instance
+            const capi = new platformClient.ConversationsApi()
+
+            let call = await capi.postConversationsCalls(body)
+            if (debug) console.log('Call: ', call)
+        }
+
+        async function makeTransfer(transferUserId) {
+            const client = platformClient.ApiClient.instance
+            const capi = new platformClient.ConversationsApi()
+
+            //First get conversations
+            var opts = {
+                communicationType: "Call" // String | Call or Chat communication filtering
+            }
+            let conversations = await capi.getConversations(opts)
+            var externalParticipant = conversations.entities[0].participants.find(p => p.purpose === "external")
+            var conversationId = conversations.entities[0].id
+            var participantId = externalParticipant.id
+
+            var body = {
+                destination: {
+                    userId: transferUserId
+                }
+            }
+            let transferCall = await capi.postConversationsCallParticipantConsult(conversationId, participantId, body)
+            if (debug) console.log('Transfering: ', transferCall)
+        }
+
+        //JavaScript Native way to get Url Parameters for config
+        function getParameterByName(name, url) {
+            if (!url) url = window.location.href;
+            name = name.replace(/[\[\]]/g, '\\$&');
+            var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
+                results = regex.exec(url);
+            if (!results) return null;
+            if (!results[2]) return '';
+            return decodeURIComponent(results[2].replace(/\+/g, ' '));
+        }
+    </script>
+</body>
+
+</html>
